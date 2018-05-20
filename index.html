@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html>
+
+
+<style>
+
+
+.unselectable {
+  -webkit-user-select: none; 
+  -moz-user-select: none;    
+}
+
+
+</style>
+
+<body>
+
+
+<div id="instructDiv" class="unselectable"  style="position:relative;">
+	left-click + drag: set and edit lock points (the pink circles) <br> right-click: delete lock points <br><br> <br>
+	 <button type="button" id="reset" onclick="resetBoard();">reset</button>   <br> 
+	board length <input id="length"  type="range" min="10" max="300" value="150" step="1" oninput= 'updateLength();' style="width:400px"></input> 
+	<a id='lengthLabel'> 150 cm </a> <br> 
+	array spacing <input id="res"  type="range" min=".2" max="10" value="3" step="0.1" oninput = 'changeRes(true);' style="width:400px"></input> 
+	<a id="resLab"></a> <br> <br>
+	<br> Top view <br>
+	<canvas id="topViewT" oncontextmenu="return false;" width="200" height="100" style="border:3px solid black; position: absolute; z-index: 1;"></canvas>	
+	<canvas id="topView" oncontextmenu="return false;" width="200" height="100" style="border:3px solid black; z-index: 0"></canvas> <br>
+	<br> <br> Side view (board bend)<br>
+	<canvas id="sideViewT" oncontextmenu="return false;" width="200" height="100" style="border:3px solid black; position: absolute; z-index: 1;"></canvas>	
+	<canvas id="sideView" oncontextmenu="return false;" width="200" height="100" style="border:3px solid black; z-index: 0"></canvas>	<br> <br> 
+	<input type="text" id="fName" value="twinBoard.txt"> </input> <button type="button" id="download" onclick="mapIt(true);"> download point array</button> (output is in meters)<br>
+	<a id='dummy' style="visibility: hidden"</a>
+	
+</div>
+
+</body>
+
+<script>
+
+const WIN = 0;
+const TOP = 0;
+const SIDE = 1;
+const OUT = -1;
+
+const ACT = 1;
+const EDIT = 1;
+const WATCH = 0;
+
+const POINT = 2;
+
+const UP = -1;
+const DOWN = 1;
+const MOVE = 0;
+
+const width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+const height = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+const widthMax = 5;
+const infVal = 4;
+
+var length;
+var pts = [];
+var state = [-1,-1,-1];
+
+var canv = [];
+var canvT = [];
+var cx = [];
+var cxT = [];
+
+canv.push(document.getElementById("topView"));
+cx.push(canv[0].getContext("2d"));
+canv[0].width = width * 0.75;
+canv[0].height = canv[0].width/widthMax;
+var WD = canv[0].width;
+var HT = canv[0].height;
+var halfWD = WD/2;
+var halfHT = HT/2;
+const pointRad = 6;
+const pointRadRel = pointRad/halfWD*widthMax;
+
+canvT.push(document.getElementById("topViewT"));
+cxT.push(canvT[0].getContext("2d"));
+canvT[0].width = WD;
+canvT[0].height = HT;
+canvT[0].style.left = canv[0].style.left;
+canvT[0].style.top = canv[0].style.top;
+
+canv.push(document.getElementById("sideView"));
+cx.push(canv[1].getContext("2d"));
+canv[1].width = WD;
+canv[1].height = HT;
+
+canvT.push(document.getElementById("sideViewT"));
+cxT.push(canvT[1].getContext("2d"));
+canvT[1].width = WD;
+canvT[1].height = HT;
+canvT[1].style.left = canv[0].style.left;
+canvT[1].style.top = canv[0].style.top;
+
+canvT[0].addEventListener("mousedown", whatDoIdo);
+canvT[0].addEventListener("mousemove", whatDoIdo);
+canvT[1].addEventListener("mousedown", whatDoIdo);
+canvT[1].addEventListener("mousemove", whatDoIdo);
+document.addEventListener("mouseup", whatDoIdo);
+
+resetBoard();
+
+function resetBoard()
+{
+	pts = [];
+	
+	var tArr = [];
+	tArr.push([-widthMax,0]);
+	tArr.push([-widthMax*.88,.96]);
+	tArr.push([-widthMax*.83,.95]);
+	tArr.push([widthMax*.83,.95]);
+	tArr.push([widthMax*.88,.96]);
+	tArr.push([widthMax,0]);
+	pts.push(tArr);
+	
+	var tArr = [];
+	tArr.push([-widthMax,0.3]);
+	tArr.push([-widthMax*.92,-.1]);
+	tArr.push([-widthMax*.7,-.15]);
+	tArr.push([0,0]);
+	tArr.push([widthMax*.7,-.15]);
+	tArr.push([widthMax*.92,-.1]);
+	tArr.push([widthMax,0.3]);
+	pts.push(tArr);
+	
+	document.getElementById("length").value = 150;
+	document.getElementById("res").value = 3;
+	updateLength();
+	var curWIN = state[WIN];
+	
+	
+	
+	for(var i = 0; i < 2; i += 1)
+	{
+		if(i === 0)
+			state[WIN] = TOP;
+		else
+			state[WIN] = SIDE;
+		
+		reDraw((i === 0)? true: false);
+	}
+	state[WIN] = curWIN;
+
+}
+
+function updateLength()
+{
+	var oldLength = (length === 0)? 150: length;
+	length = document.getElementById("length").value;
+	document.getElementById("lengthLabel").innerHTML = length + ' cm';
+	changeRes(true);	
+	
+}
+
+function changeRes(reCalc)
+{
+	var res = document.getElementById("res");
+	document.getElementById("resLab").innerHTML = Math.round(res.value * 100)/100 + ' cm';
+	
+	if(reCalc)
+	{
+		var curWIN = state[WIN];
+		state[WIN] = TOP;
+		reDraw(true);
+		state[WIN] = SIDE;
+		reDraw(false);
+		state[WIN] = curWIN;
+	}
+	console.log('here');
+}
+
+function whatDoIdo(event)
+{
+	if(state[ACT] !== EDIT)
+	{
+		switch(event.target.id)
+		{
+			case canvT[0].id:
+				state[WIN] = TOP;
+				break;
+			case canvT[1].id:
+				state[WIN] = SIDE;
+				break;
+			default:
+				state[WIN] = OUT;
+		}
+	}
+	
+	switch(event.type)
+	{
+		case "mousedown":
+			if(event.buttons === 2)	//delete point
+			{
+				findNearestPoint(event);
+				if(state[POINT] !== -1)
+				{
+					if(state[POINT] !== 0 && state[POINT] !== pts[state[WIN]].length-1)
+					{
+						removePoint(state[POINT]);
+						reDraw(true);
+					}
+					state[POINT] = -1;
+					
+				}
+				state[ACT] = WATCH;
+			}
+			else
+			{
+				findNearestPoint(event);
+				if(state[POINT] === -1)
+					addPoint(event); //also set the point index
+				else
+				{
+					editPoint(event);
+				}
+				reDraw(true);
+				state[ACT] = EDIT;
+			}
+			break;
+			
+		case "mousemove":
+			if(state[ACT] === EDIT)
+			{
+				editPoint(event);	//also check for crossovers and delete them
+				//console.log(res);
+				reDraw(document.getElementById("res").value >= 3);
+			}
+			else
+			{
+				findNearestPoint(event);
+			}
+			break;
+		
+		case "mouseup":
+			if(state[ACT] === EDIT) reDraw(true);
+			state[ACT] = WATCH;
+			break;
+		
+		default:
+			console.log("what event type is this ? " + event.type);
+	}
+	reDrawT(TOP, event);
+	reDrawT(SIDE, event);
+}
+
+	
+function calcX(event)
+{
+	var rect = canv[state[WIN]].getBoundingClientRect();
+	return Math.min(Math.max((event.clientX-(rect.left + halfWD + 3)) /halfWD * widthMax, -widthMax), widthMax);
+}
+
+function calcY(event)
+{
+	var rect = canv[state[WIN]].getBoundingClientRect();
+	var lim = (state[WIN] === TOP) ? 0 : -1;
+	return Math.max(Math.min(-(event.clientY-(rect.top + halfHT + 3)) /halfHT,1),lim);
+}
+function findNearestPoint(event)
+{
+	state[POINT] = -1;
+	relX = calcX(event);
+	
+	
+	for(var i = 0; i < pts[state[WIN]].length; i += 1)
+	{
+		if(Math.abs(pts[state[WIN]][i][0]-relX) <= pointRadRel)
+		{
+			state[POINT] = i;
+			return;
+		}
+	}
+}
+
+function addPoint(event)
+{
+	relX = calcX(event);
+	relY = calcY(event);	
+	
+	for(var i = 0; i < pts[state[WIN]].length; i += 1)
+	{
+		if(relX < pts[state[WIN]][i][0])
+		{
+			pts[state[WIN]].splice(i,0,[relX,relY]);
+			state[POINT] = i;
+			return;
+		}
+	}
+	console.log("couldn't find the right spot for it");
+}
+
+function removePoint(pointInd)
+{
+	pts[state[WIN]].splice(pointInd,1);
+}
+
+
+function editPoint(event)
+{
+	
+	if(state[POINT] === 0)
+		relX = -widthMax;
+	else if(state[POINT] === pts[state[WIN]].length -1)
+		relX = widthMax;
+	else
+		relX = calcX(event);
+	
+	if(Math.abs(relX) === widthMax && state[WIN] === TOP)
+		relY = 0;
+	else      
+		relY = calcY(event);
+	
+	//check for moving past lower points
+	//console.log(state[POINT]);
+	for(var i = state[POINT]-1; i >= 0; i -= 1)
+	{
+		if(pts[state[WIN]][i][0] >= relX)
+		{
+			console.log('removed lower point ' + i);
+			removePoint(i);
+			state[POINT] -= 1;
+		}
+		else
+			break;
+	}
+	
+	//check for moving past higher points
+	for(var i = state[POINT] + 1; i < pts[state[WIN]].length; i += 1)
+	{
+		if(pts[state[WIN]][i][0] <= relX)
+		{
+			console.log('removed upper ' + i + ' cur point ' + state[POINT]);
+			removePoint(i);
+		}
+		else
+			break;
+	}
+	
+	//move the point		
+	pts[state[WIN]][state[POINT]][0] = relX;
+	pts[state[WIN]][state[POINT]][1] = relY;
+	//console.log(relX + ', ' + relY);
+}	
+
+
+
+
+function reDraw(drawMap)
+{
+	//clear and draw horiz and vert midpoint lines
+	cx[state[WIN]].clearRect(0, 0, WD, HT);
+	
+	cx[state[WIN]].lineWidth = 5;
+	cx[state[WIN]].lineStyle = 'RGB(0,0,0)';
+	//cx[state[WIN]].beginPath();
+	/*cx[state[WIN]].moveTo(0, halfHT);
+	cx[state[WIN]].lineTo(WD, halfHT);
+	cx[state[WIN]].stroke();
+	cx[state[WIN]].beginPath();
+	cx[state[WIN]].moveTo(halfWD, HT);
+	cx[state[WIN]].lineTo(halfWD,0);
+	cx[state[WIN]].stroke(); */
+	
+	
+	//get the equation coefficients
+	var coeffs = matrixSolver(pts[state[WIN]], state[WIN]);
+
+	//draw the curve and calc points
+	cx[state[WIN]].beginPath();
+	if(state[WIN] === TOP) cx[state[WIN]].moveTo(0,halfHT);
+	else  cx[state[WIN]].moveTo(0,halfHT *(1-getXY(coeffs, 0, 0, 1)));
+	for(var i = 0; i < pts[state[WIN]].length-1; i += 1)
+	{
+		for(var u = 0; u < coeffs[2][i]; u += .1)
+		{
+			//console.log(getXY(coeffs[0], i, u, 0) + ', ' + getXY(coeffs[0], i, u, 1));
+			cx[state[WIN]].lineTo((1+getXY(coeffs, i, u, 0)/5)*halfWD, halfHT *(1-getXY(coeffs, i, u, 1)));
+		}
+	}
+	cx[state[WIN]].stroke();
+	/* if(state[WIN] === TOP)
+	{
+		cx[state[WIN]].fillStyle = 'RGB(95,205,183)';
+		cx[state[WIN]].fill();
+	} */
+	if(state[WIN] === TOP)
+	{
+		//cx[state[WIN]].save();
+		cx[state[WIN]].save();
+		cx[state[WIN]].transform(1,0,0,-1,0,HT);
+		cx[state[WIN]].drawImage(canv[state[WIN]], 0, 0)
+		cx[state[WIN]].restore();
+	}
+	
+	if(drawMap)
+	{
+		mapIt(false);
+		//return;
+	}
+	
+	if(state[WIN] !== TOP)
+	{
+		cx[state[WIN]].fillStyle = 'RGB(255,0,255)';
+		for(var i=0; i < pts[state[WIN]].length; i += 1)
+		{
+			cx[state[WIN]].beginPath();
+			cx[state[WIN]].arc((pts[state[WIN]][i][0]+widthMax)/(2*widthMax) * WD, halfHT * (1-pts[state[WIN]][i][1]),pointRad * 1.5,0,6.3);
+			cx[state[WIN]].fill();
+		
+		}
+	}
+	cx[state[WIN]].lineWidth = 2;
+	cx[state[WIN]].beginPath();
+	cx[state[WIN]].moveTo(0, halfHT);
+	cx[state[WIN]].lineTo(WD, halfHT);
+	cx[state[WIN]].stroke();
+	cx[state[WIN]].beginPath();
+	cx[state[WIN]].moveTo(halfWD, HT);
+	cx[state[WIN]].lineTo(halfWD,0);
+	cx[state[WIN]].stroke();
+	
+	
+	
+	//console.log('about to map');
+	
+}
+
+
+function reDrawT(win, event)
+{
+	//clear and draw horiz and vert midpoint lines
+	cxT[win].clearRect(0, 0, WD, HT);
+	
+	if(win === state[WIN])
+	{
+		var relX = (calcX(event)+widthMax)/(2*widthMax) * WD;
+		cxT[state[WIN]].beginPath();
+		cxT[state[WIN]].lineWidth = 1;
+		cxT[state[WIN]].strokeStyle = 'RGB(0,200,0)';
+		cxT[state[WIN]].moveTo(relX,0);
+		cxT[state[WIN]].lineTo(relX, HT);
+		cxT[state[WIN]].stroke();
+		
+		cxT[state[WIN]].beginPath();
+		
+		var txtWd = 135;
+		var txtHt = 25;
+		var offset = 18;
+		if(state[POINT] !== -1)
+		{
+
+			var x = (pts[state[WIN]][state[POINT]][0]+widthMax)/(2*widthMax) * WD;
+			var y = halfHT * (1-pts[state[WIN]][state[POINT]][1]);
+			
+			cxT[state[WIN]].fillStyle = 'RGB(0,255,0)';
+			cxT[state[WIN]].arc(x, y,pointRad,0,6.3);
+			cxT[state[WIN]].fill();
+			
+			boxX = Math.min(x + offset, WD-txtWd-offset);
+			boxY = Math.min(y+offset, HT-txtHt-offset);
+			cxT[state[WIN]].fillStyle = 'RGB(255,255,255)';
+			cxT[state[WIN]].beginPath();
+			cxT[state[WIN]].fillRect(boxX, boxY, txtWd, txtHt);
+
+			
+			cxT[state[WIN]].strokeStyle = 'RGB(0,0,0)';
+			cxT[state[WIN]].beginPath();
+			cxT[state[WIN]].strokeRect(boxX, boxY, txtWd, txtHt);
+	
+			
+			
+			cxT[state[WIN]].beginPath();
+			cxT[state[WIN]].font = "18px Calibri";
+			var lab = 'width';
+			if(state[WIN] === SIDE)
+				lab = 'height';
+			
+			cxT[state[WIN]].fillStyle = 'RGB(0,50,0)';
+			cxT[state[WIN]].fillText('(' + lab + ' = ' + (100 * toMeters(2*pts[state[WIN]][state[POINT]][1])).toFixed(1) + ' cm)', boxX + 2, boxY +txtHt -6);
+		}
+		//console.log(relY + ', ' + halfHT);
+		
+	
+	}
+
+}
+function dist(x1, x2, y1, y2)
+{
+	return Math.pow(Math.pow(x2-x1,2) + Math.pow(y2-y1,2),0.5);
+}
+
+function findUinc(coeffs, ptInd, incXY)
+{
+	var lineRes = 20;
+	var uInc = coeffs[2][ptInd]/lineRes;
+	var uCur = 0;
+	var totDist = 0;
+	var prevX;
+	var curX;
+	var prevY; 
+	var curY;
+	for(var seg = 0; seg <= lineRes; seg += 1)
+	{
+		curX = getXY(coeffs, ptInd, uCur, 0);
+		curY = getXY(coeffs, ptInd, uCur, 1);
+		if(seg > 0)
+			totDist += dist(curX, prevX, curY, prevY);
+		
+		prevX = curX;
+		prevY = curY;
+		uCur += uInc;
+	}
+	var uInc = coeffs[2][ptInd]/(totDist/incXY);
+	var numPts = Math.ceil(coeffs[2][ptInd]/uInc);
+	return coeffs[2][ptInd]/numPts;
+}
+
+function toMeters(unitVal)
+{
+	return unitVal/(widthMax *2)*length/100;
+}
+
+function toUnit(centimeters)
+{
+	return centimeters/length * (widthMax * 2);
+}
+
+function findHt(coeffs, coeffsInd, targX, res)
+{
+	var ptsInd = -1;
+
+	for(var i = 0; i < pts[coeffsInd].length; i += 1)
+	{
+		if(pts[coeffsInd][i][0] > targX)
+		{
+			ptsInd = i-1;
+			break;
+		}
+	}
+	if(ptsInd === -1)
+	{
+		ptsInd = pts[coeffsInd].length-2;
+	}
+	
+	
+	var lwrU = 0;
+	var uprU = coeffs[2][ptsInd];
+	var curX;
+	var itr = 0;
+	var okErr = res/60;
+	//console.log(res/60);
+	do
+	{
+		itr += 1;
+		if(itr > 30)
+			break;
+		
+		midU = (uprU + lwrU)/2;
+		curX = getXY(coeffs, ptsInd, midU, 0);
+		if(curX > targX)
+			uprU = midU;
+		else
+			lwrU = midU;
+		//console.log(' targ: ' + targX + ', cur: ' + curX);
+		
+	} while(Math.abs(curX-targX) > okErr);
+	//console.log(itr + ' iterations' + Math.abs(curX-targX));
+	
+	return getXY(coeffs, ptsInd, midU, 1);
+}
+var elemCnt = 0;	
+function addToStr(mapPt)
+{
+	var perLine = 4;
+	var precision = 4;
+	var outStr = "";
+	
+	if(elemCnt >= perLine)
+	{
+		outStr += '\n';
+		elemCnt = 0;
+	}
+	else if(elemCnt !== 0)
+	{
+		outStr += ', ';
+	}
+	//console.log(mapPt);
+	
+	outStr += '[' + mapPt[1].toFixed(precision) + ', ' + mapPt[2].toFixed(precision) + ', ' +  mapPt[0].toFixed(precision)+ ']';
+	elemCnt += 1;
+	return outStr;
+}
+
+function mapIt(download)
+{
+	elemCnt = 0;
+	//console.log('mapping');
+	var mapPts = [];
+	var incXY = toUnit(document.getElementById("res").value);
+	var maxHT = -1;
+	var minHT = 1;
+	
+	//get the function coefficients and uVals
+	var topCoeffs = matrixSolver(pts[TOP],TOP);
+	var sideCoeffs = matrixSolver(pts[SIDE],SIDE);
+	//console.log(topCoeffs + ', ' + sideCoeffs);
+	var midHt = findHt(sideCoeffs,SIDE, 0, incXY);
+	//initial center point
+	var outStr = "EDGE\n";
+	
+	//loop around edge points
+	for(var pt = 0; pt < pts[TOP].length-1; pt += 1)
+	{
+		//find the appropriate u increment based on the length of the segment
+		uInc = findUinc(topCoeffs, pt, incXY);
+		//console.log('uMax: ' + topCoeffs[2][pt] + ', uinc: ' + uInc);
+		//add points for the segment
+		for(var uCur = 0; uCur < topCoeffs[2][pt]; uCur += uInc)
+		{
+			
+			var x = getXY(topCoeffs, pt, uCur, 0);
+			var ht = findHt(sideCoeffs, SIDE, x, incXY)-midHt;
+			minHT = Math.min(minHT, ht);
+			maxHT = Math.max(maxHT, ht);
+			mapPts.push([toMeters(x), 
+							toMeters(getXY(topCoeffs, pt, uCur, 1)), 
+							toMeters(ht)]);	
+			outStr += addToStr(mapPts[mapPts.length-1]);
+			
+			if(mapPts.length > 1)
+			{
+				mapPts.push([mapPts[mapPts.length-1][0],-mapPts[mapPts.length-1][1],mapPts[mapPts.length-1][2]]);
+				outStr += addToStr(mapPts[mapPts.length-1]);
+			}
+		}
+		if(pt === pts[TOP].length -2)
+		{
+			var x = widthMax;
+			
+			var ht = findHt(sideCoeffs, SIDE, x, incXY)-midHt;
+			
+			minHT = Math.min(minHT, ht);
+			maxHT = Math.max(maxHT, ht);
+			mapPts.push([toMeters(x), 0, toMeters(ht)]);
+			outStr += addToStr(mapPts[pt]);
+			
+			//console.log('doing end ' + ', x: ' + x + ', ' + ht);
+		}
+	
+	}
+	
+	
+		outStr += '\n\nCENTER\n';
+		elemCnt = 0;
+		//fill in center points
+		var first = true;
+		for(var x = -widthMax + incXY; x < widthMax; x += incXY)
+		{
+			var y = findHt(topCoeffs, TOP, x, incXY);
+			var ht = findHt(sideCoeffs, SIDE, x, incXY)-midHt;
+			
+			var num = Math.ceil(2*y/incXY);
+			var delY = 2*y/num;
+			//console.log(num);
+			for(var j = 1; j < num; j += 1)
+			{
+				mapPts.push([toMeters(x), toMeters(y-delY * j), toMeters(ht)]);
+				outStr += addToStr(mapPts[mapPts.length-1]);
+				first = false;
+			}
+		}	
+	
+	if(download)
+	{
+		
+		
+		var data = new Blob([outStr], {type: 'text/plain'});
+		document.getElementById('dummy').href = URL.createObjectURL(data);
+		var fName = document.getElementById('fName').value;
+		var link = document.getElementById('dummy').href;
+		if(fName === "")
+		{
+			console.log('no filename');
+			return;
+		}	
+		if(link === "")
+		{
+			console.log('no data');
+			return;
+		}
+		document.getElementById('dummy').download =fName;
+		document.getElementById('dummy').click();
+	
+	}
+	
+	
+	//draw the map
+	drawMap(mapPts, toMeters(maxHT), toMeters(minHT));
+}
+
+function interpRGB(maxZ, minZ, curZ)
+{
+	var minRGB = [58,187,255];
+	var maxRGB = [187,255,58];
+	/* var maxRGB = [51,204,153];
+	var minRGB = [153,0,255]; */
+	var str = "RGB(";
+	for(var k = 0; k < 3; k += 1)
+	{
+		str = str + (Math.round(minRGB[k] + (maxRGB[k]-minRGB[k])* (curZ-minZ)/(maxZ-minZ)));
+		if(k < 2)
+			str += ', ';
+		else	
+			str += ')';
+	}
+
+	return str;
+	
+
+}
+function drawMap(mapArray, maxZ, minZ)
+{
+	//console.log('drawing');
+	var zFact = 255/(maxZ-minZ);
+	for(var x = 0; x < mapArray.length; x += 1)
+	{
+		xPos= toUnit(mapArray[x][0]*100)*halfWD/widthMax + halfWD;
+		yPos = -toUnit(mapArray[x][1]*100)*halfWD/widthMax + halfHT;
+		cx[TOP].fillStyle = interpRGB(maxZ, minZ, mapArray[x][2]);
+		
+		//console.log(xPos + ', ' + yPos + ', ' + zPos);
+		cx[TOP].beginPath();	
+		cx[TOP].arc(xPos, yPos, pointRad, 0, 6.3);
+		cx[TOP].fill();
+	}
+	
+	cx[TOP].fillStyle = 'RGB(255,0,255)';
+	for(var i=0; i < pts[TOP].length; i += 1)
+	{
+		cx[TOP].beginPath();
+		cx[TOP].arc((pts[TOP][i][0]+widthMax)/(2*widthMax) * WD, halfHT * (1-pts[TOP][i][1]),pointRad * 1.5,0,6.3);
+		cx[TOP].fill();
+	
+	}
+	
+}
+
+
+/*
+function download()
+{
+	var incX = widthMax * 2/(drawPts-1);	
+
+	var ys = [];
+	var outArray = [];
+	
+	
+	incX = length/100/drawPts;
+	posX= -length/100/2;
+	var midX = Math.floor(drawPts/2)-1;
+	var zeroY = ys[1][Math.floor(drawPts/2)-1];
+	outArray.push([0,0,0]);
+	var maxY = 0;
+	var minY = 100;
+	var elemCnt = 1;
+	var perLine = 4;
+	var precision = 10;
+	var outStr = "[" + maxY.toFixed(precision) + ', ' + maxY.toFixed(precision) + ', ' + maxY.toFixed(precision) + ']';
+	for(var i = 0; i < drawPts; i += 1)
+	{
+		var rowCnt = Math.ceil(2* ys[0][i]/incX)+1;
+		var incY = (2 * ys[0][i])/(rowCnt-1);
+		var posY = ys[0][i];
+		var tempRow = [];
+		for(var j = 0; j < rowCnt; j += 1)
+		{	
+			var curY = ys[1][i]-zeroY;
+			minY = Math.min(curY, minY);
+			maxY = Math.max(curY, maxY);
+			tempRow.push([posX,posY,curY]);
+			outStr += ', ';
+			if(elemCnt === perLine)
+			{
+				outStr += "\n";
+				elemCnt = 0;
+			}
+			outStr += '[' + posX.toFixed(precision) + ', ' + posY.toFixed(precision) + ', ' + curY.toFixed(precision) + ']';
+			elemCnt += 1;
+			
+			posY -= incY;
+		}
+		if(tempRow.length > 1)
+			outArray.push(tempRow);
+		posX += incX;
+	}
+	drawMap(outArray, maxY, minY);
+	
+	
+	var data = new Blob([outStr], {type: 'text/plain'});
+	document.getElementById('dummy').href = URL.createObjectURL(data);
+	var fName = document.getElementById('fName').value;
+	var link = document.getElementById('dummy').href;
+	if(fName === "")
+	{
+		console.log('no filename');
+		return;
+	}	
+	if(link === "")
+	{
+		console.log('no data');
+		return;
+	}
+	document.getElementById('dummy').download =fName;
+	document.getElementById('dummy').click();
+	
+}
+
+
+
+function getUinc(coeffs, pointInd, XYind)
+{
+	var start = pointInd * 4;
+	var done = false;
+	var uVal = .5;
+	while(!done)
+	{
+		
+	}
+	return outVal;
+}
+*/			
+function getXY(coeffs, pointInd, uVal, XYind)
+{
+	
+	var start = pointInd * 4;
+	var outVal = 0;
+	//console.log('coeffInd ' + start + ', coeffs ' + coeffs[XYind][start + 1] + ', ind ' + pointInd + ', u ' + uVal + ', x or y ' + XYind);
+	for(var i = 0; i < 4; i += 1)
+	{
+		outVal += coeffs[XYind][start + i] * Math.pow(uVal, 3-i);
+	}
+	return outVal;
+}
+
+function printMatrix(coeffs)
+{
+	var line;
+	for(var i = 0; i < coeffs.length; i += 1)
+	{
+		line = "";
+		if(coeffs[i].length !== coeffs.length +1)
+			console.log('line ' + i);
+		for(var j = 0; j < coeffs[i].length; j += 1)
+			line += " " + Math.round(coeffs[i][j] * 100)/100;
+		console.log(line);
+	}
+}
+
+
+
+function padZeros(arr, doneLength)
+{
+	while(arr.length < doneLength)
+		arr.push(0);
+}
+
+function yAtPoint(uCur, pointVal, indCur, lines)
+{
+	var start = indCur * 4;
+	var tArr = [];
+	padZeros(tArr,start);
+	for(var i = 3; i > -1; i -= 1)
+		tArr.push(Math.pow(uCur,i));
+
+	padZeros(tArr,lines);
+	tArr.push(pointVal);
+	if(tArr.length !== lines + 1) console.log('ahhhhhhh');
+	return tArr;
+}
+
+function yPrimeAtKnot(uPrev, indCur, indPrev, lines)
+{
+	var tArr = [];
+	padZeros(tArr,lines+1);
+	
+	//y' of prev at u = 1
+	var start = (indPrev) * 4;
+	tArr[start] = 3 * Math.pow(uPrev, 2);
+	tArr[start+1]= 2 * uPrev;
+	tArr[start+2]= 1;
+	
+	//y' of cur at u = 0
+	var start = (indCur) * 4;
+	tArr[start + 2] = -1;
+	
+	if(tArr.length !== lines + 1) console.log('ahhhhhhh');
+	return tArr;
+}
+
+function yDblPrimeAtKnot(uPrev, indCur, indPrev, lines)
+{
+	var tArr = [];
+	padZeros(tArr,lines+1);
+	
+	//y'' of prev at u = 1
+	var start = (indPrev) * 4;
+	tArr[start] =6 * uPrev;
+	tArr[start+1] = 2;
+	
+	//y'' of cur at u = 0
+	start = (indCur) * 4;
+	tArr[start+1]=(-2);
+
+	if(tArr.length !== lines + 1) console.log('ahhhhhhh');
+	return tArr;
+}
+
+function endCondition(uVal, indCur, lines)
+{
+	var tArr = [];
+	var start = indCur * 4;
+	padZeros(tArr, lines + 1);
+	
+	tArr[start] = 6 * uVal;
+	tArr[start+1] = 2;
+	
+	return tArr;
+}
+
+ function matrixSolver(xyPts, win)
+ {
+	var sol = [];
+	var tempPts = xyPts.slice();
+
+	if(win === TOP)
+	{
+		for(var i = tempPts.length-2; i > 0; i -= 1)
+		{
+			tempPts.push([tempPts[i][0],-tempPts[i][1]]);
+		}
+		lines = (tempPts.length) * 4;
+	}
+	else	
+		lines = (tempPts.length-1) * 4;
+		
+	var uVals = [];
+	for(var cur = 0; cur < tempPts.length; cur += 1)
+	{
+		var next = (cur + 1 ) % tempPts.length;
+		uVals.push(dist(tempPts[next][0], tempPts[cur][0], tempPts[next][1], tempPts[cur][1]));
+	}
+	//console.log(tempPts);
+	
+	for(var x = 0; x < 2; x += 1)
+	{
+		var coeffs = [];		
+		for(var cur = 0; cur < tempPts.length; cur += 1)
+		{
+			
+			var prev = (cur + tempPts.length -1 ) % tempPts.length;
+			//console.log('uval now ' + uVals[cur] + ', prev ' + uVals[prev]);
+			
+			if(win === SIDE && cur === 0)
+			{
+				coeffs.push(endCondition(0, cur, lines));	//natural end condition
+				coeffs.push(yAtPoint(0,tempPts[cur][x], cur, lines));	//y of current coefficients
+			}
+			else if(win === SIDE && cur === tempPts.length-1)
+			{
+				coeffs.push(yAtPoint(uVals[prev],tempPts[cur][x], prev, lines));	//y of previouse coefficients
+				coeffs.push(endCondition(uVals[prev], prev, lines));	//natural end condition
+			}
+			else
+			{
+				coeffs.push(yAtPoint(uVals[prev],tempPts[cur][x], prev, lines));	//y of previous coefficients					
+				coeffs.push(yPrimeAtKnot(uVals[prev], cur, prev, lines));	// equate y's at point
+				coeffs.push(yDblPrimeAtKnot(uVals[prev], cur, prev, lines));	// equate y''s at point	
+				coeffs.push(yAtPoint(0,tempPts[cur][x], cur, lines));	//y of current coefficients
+			}
+	
+		}
+		
+		//
+		//lower diagonal
+		for(var i = 0; i < lines; i += 1)
+		{
+			//set first column to 1's
+			for(var j = i; j < lines; j += 1)
+			{
+				if(i === j && Math.abs(coeffs[j][i]) === 0)
+				{
+					//console.log(coeffs[j]);
+					var fixed = false;
+					for(var k = j+1; k < lines; k += 1)
+					{
+						if(Math.abs(coeffs[k][i]) !== 0)
+						{
+							for(var z = 0; z < coeffs[k].length; z +=1)
+								coeffs[j][z] += coeffs[k][z];
+							fixed = true;
+							break;
+						}
+					}
+				}
+					
+						
+				if(Math.abs(coeffs[j][i]) !== 0)
+				{
+					var mult = 1/coeffs[j][i];
+					for(var k = i; k <= lines; k += 1)
+					{
+						coeffs[j][k] *= mult;
+					}
+				}
+				else if(j === i)
+					console.log('line ' + j + ' is fucked');
+			}
+
+			//set lower first columns to 0's
+			for(var j=i+1; j < lines; j+=1)
+			{
+				if(Math.abs(coeffs[j][i]) !== 0)
+				{
+					for(var k = i; k <= lines; k += 1)
+					{
+						coeffs[j][k] = -coeffs[j][k] + coeffs[i][k];
+					}
+				}
+			}	
+		}
+
+		//upper diagonal
+		for(var i = lines-1; i > 0; i -= 1)
+		{
+			//set last column to 0's
+			for(var j = i-1; j >= 0; j -= 1)
+			{
+				if(Math.abs(coeffs[j][i]) !== 0)
+				{
+					var mult = -coeffs[j][i];
+					for(var k = j+1; k <= lines; k += 1)
+					{
+						coeffs[j][k] = coeffs[j][k] + mult * coeffs[i][k];
+					}
+				}
+			}
+
+		}
+		
+		var tSol = [];
+		for(var i = 0; i < lines; i +=1)
+			tSol.push(coeffs[i][lines]);
+		sol.push(tSol);
+		
+		//console.log('did one' + x);
+	}sol.push(uVals);
+	//printMatrix(coeffs);
+	//console.log('done');
+	//console.log(sol.length);
+	return sol;
+}
+
+
+
+
+
+
+		
+
+
+</script>
+  
+
+</html> 
